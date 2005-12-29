@@ -5,11 +5,11 @@
 # Copyright jelmer@samba.org 2004-2005
 # released under the GNU GPL
 
-package Parse::Pidl::Samba::NDR::Parser;
+package Parse::Pidl::Samba4::NDR::Parser;
 
 use strict;
 use Parse::Pidl::Typelist qw(hasType getType mapType);
-use Parse::Pidl::Util qw(has_property ParseExpr);
+use Parse::Pidl::Util qw(has_property ParseExpr print_uuid);
 use Parse::Pidl::NDR qw(GetPrevLevel GetNextLevel ContainsDeferred);
 
 use vars qw($VERSION);
@@ -101,7 +101,7 @@ sub get_value_of($)
 	}
 }
 
-my $res = "";
+my $res;
 my $deferred = "";
 my $tabs = "";
 
@@ -116,6 +116,10 @@ sub pidl($)
 	}
 	$res .="\n";
 }
+
+my $res_hdr;
+
+sub pidl_hdr ($) { my $d = shift; $res_hdr .= "$d\n"; }
 
 ####################################
 # defer() is like pidl(), but adds to 
@@ -188,13 +192,17 @@ sub check_null_pointer_void($)
 }
 
 #####################################################################
-# work out is a parse function should be declared static or not
-sub fn_prefix($)
+# declare a function public or static, depending on its attributes
+sub fn_declare($$)
 {
-	my $fn = shift;
+	my ($fn,$decl) = @_;
 
-	return "" if (has_property($fn, "public"));
-	return "static ";
+	if (has_property($fn, "public")) {
+		pidl_hdr "$decl;";
+		pidl "$decl";
+	} else {
+		pidl "static $decl";
+	}
 }
 
 ###################################################################
@@ -292,7 +300,11 @@ sub ParseArrayPushHeader($$$$$)
 	my $length;
 
 	if ($l->{IS_ZERO_TERMINATED}) {
-		$size = $length = "ndr_string_length($var_name, sizeof(*$var_name))";
+		if (has_property($e, "charset")) {
+			$size = $length = "ndr_charset_length($var_name, CH_$e->{PROPERTIES}->{charset})";
+		} else {
+			$size = $length = "ndr_string_length($var_name, sizeof(*$var_name))";
+		}
 	} else {
 		$size = ParseExpr($l->{SIZE_IS}, $env);
 		$length = ParseExpr($l->{LENGTH_IS}, $env);
@@ -575,8 +587,7 @@ sub ParseElementPushLevel
 
 	my $ndr_flags = CalcNdrFlags($l, $primitives, $deferred);
 
-	if ($l->{TYPE} eq "ARRAY" and ($l->{IS_CONFORMANT} or $l->{IS_VARYING} 
-		or is_charset_array($e, $l))) {
+	if ($l->{TYPE} eq "ARRAY" and ($l->{IS_CONFORMANT} or $l->{IS_VARYING})) {
 		$var_name = get_pointer_to($var_name);
 	}
 
@@ -721,8 +732,7 @@ sub ParseElementPrint($$$)
 		} elsif ($l->{TYPE} eq "ARRAY") {
 			my $length;
 
-			if ($l->{IS_CONFORMANT} or $l->{IS_VARYING} or 
-				is_charset_array($e,$l)) { 
+			if ($l->{IS_CONFORMANT} or $l->{IS_VARYING}) {
 				$var_name = get_pointer_to($var_name); 
 			}
 			
@@ -921,14 +931,22 @@ sub ParseMemCtxPullEnd($$)
 	pidl "NDR_PULL_SET_MEM_CTX(ndr, $mem_r_ctx, $mem_r_flags);";
 }
 
+sub CheckStringTerminator($$$$)
+{
+	my ($ndr,$e,$l,$length) = @_;
+	my $nl = GetNextLevel($e, $l);
+
+	# Make sure last element is zero!
+	pidl "NDR_CHECK(ndr_check_string_terminator($ndr, $length, sizeof($nl->{DATA_TYPE}_t)));";
+}
+
 sub ParseElementPullLevel
 {
 	my($e,$l,$ndr,$var_name,$env,$primitives,$deferred) = @_;
 
 	my $ndr_flags = CalcNdrFlags($l, $primitives, $deferred);
 
-	if ($l->{TYPE} eq "ARRAY" and ($l->{IS_VARYING} or $l->{IS_CONFORMANT} 
-		or is_charset_array($e,$l))) {
+	if ($l->{TYPE} eq "ARRAY" and ($l->{IS_VARYING} or $l->{IS_CONFORMANT})) {
 		$var_name = get_pointer_to($var_name);
 	}
 
@@ -944,14 +962,16 @@ sub ParseElementPullLevel
 			my $nl = GetNextLevel($e, $l);
 
 			if (is_charset_array($e,$l)) {
+				if ($l->{IS_ZERO_TERMINATED}) {
+					CheckStringTerminator($ndr, $e, $l, $length);
+				}
 				pidl "NDR_CHECK(ndr_pull_charset($ndr, $ndr_flags, ".get_pointer_to($var_name).", $length, sizeof(" . mapType($nl->{DATA_TYPE}) . "), CH_$e->{PROPERTIES}->{charset}));";
 				return;
 			} elsif (has_fast_array($e, $l)) {
-				pidl "NDR_CHECK(ndr_pull_array_$nl->{DATA_TYPE}($ndr, $ndr_flags, $var_name, $length));";
 				if ($l->{IS_ZERO_TERMINATED}) {
-					# Make sure last element is zero!
-					pidl "NDR_CHECK(ndr_check_string_terminator($ndr, $var_name, $length, sizeof(*$var_name)));";
+					CheckStringTerminator($ndr,$e,$l,$length);
 				}
+				pidl "NDR_CHECK(ndr_pull_array_$nl->{DATA_TYPE}($ndr, $ndr_flags, $var_name, $length));";
 				return;
 			}
 		} elsif ($l->{TYPE} eq "POINTER") {
@@ -1001,16 +1021,17 @@ sub ParseElementPullLevel
 		ParseMemCtxPullStart($e,$l, $array_name);
 
 		if (($primitives and not $l->{IS_DEFERRED}) or ($deferred and $l->{IS_DEFERRED})) {
-			pidl "for ($counter = 0; $counter < $length; $counter++) {";
-			indent;
-			ParseElementPullLevel($e,GetNextLevel($e,$l), $ndr, $var_name, $env, 1, 0);
-			deindent;
-			pidl "}";
+			my $nl = GetNextLevel($e,$l);
 
 			if ($l->{IS_ZERO_TERMINATED}) {
-				# Make sure last element is zero!
-				pidl "NDR_CHECK(ndr_check_string_terminator($ndr, $var_name, $length, sizeof(*$var_name)));";
+				CheckStringTerminator($ndr,$e,$l,$length);
 			}
+
+			pidl "for ($counter = 0; $counter < $length; $counter++) {";
+			indent;
+			ParseElementPullLevel($e, $nl, $ndr, $var_name, $env, 1, 0);
+			deindent;
+			pidl "}";
 		}
 
 		if ($deferred and ContainsDeferred($e, $l)) {
@@ -1128,13 +1149,22 @@ sub ParseStructPush($$)
 	# we need to push the conformant length early, as it fits on
 	# the wire before the structure (and even before the structure
 	# alignment)
-	my $e = $struct->{ELEMENTS}[-1];
 	if (defined($struct->{SURROUNDING_ELEMENT})) {
 		my $e = $struct->{SURROUNDING_ELEMENT};
 
 		if (defined($e->{LEVELS}[0]) and 
 			$e->{LEVELS}[0]->{TYPE} eq "ARRAY") {
-			my $size = ParseExpr($e->{LEVELS}[0]->{SIZE_IS}, $env);
+			my $size;
+			
+			if ($e->{LEVELS}[0]->{IS_ZERO_TERMINATED}) {
+				if (has_property($e, "charset")) {
+					$size = "ndr_charset_length(r->$e->{NAME}, CH_$e->{PROPERTIES}->{charset})";
+				} else {
+					$size = "ndr_string_length(r->$e->{NAME}, sizeof(*r->$e->{NAME}))";
+				}
+			} else {
+				$size = ParseExpr($e->{LEVELS}[0]->{SIZE_IS}, $env);
+			}
 
 			pidl "NDR_CHECK(ndr_push_uint32(ndr, NDR_SCALARS, $size));";
 		} else {
@@ -1627,14 +1657,16 @@ sub ParseUnionPrint($$)
 	my ($e,$name) = @_;
 	my $have_default = 0;
 
-	pidl "int level = ndr_print_get_switch_value(ndr, r);";
-
+	pidl "int level;";
 	foreach my $el (@{$e->{ELEMENTS}}) {
 		DeclareArrayVariables($el);
 	}
 
-	pidl "ndr_print_union(ndr, name, level, \"$name\");";
 	start_flags($e);
+
+	pidl "level = ndr_print_get_switch_value(ndr, r);";
+
+	pidl "ndr_print_union(ndr, name, level, \"$name\");";
 
 	pidl "switch (level) {";
 	indent;
@@ -1797,7 +1829,7 @@ sub ParseTypedefPush($)
 	my($e) = shift;
 
 	my $args = $typefamily{$e->{DATA}->{TYPE}}->{DECL}->($e,"push");
-	pidl fn_prefix($e) . "NTSTATUS ndr_push_$e->{NAME}(struct ndr_push *ndr, int ndr_flags, $args)";
+	fn_declare($e, "NTSTATUS ndr_push_$e->{NAME}(struct ndr_push *ndr, int ndr_flags, $args)");
 
 	pidl "{";
 	indent;
@@ -1816,7 +1848,7 @@ sub ParseTypedefPull($)
 
 	my $args = $typefamily{$e->{DATA}->{TYPE}}->{DECL}->($e,"pull");
 
-	pidl fn_prefix($e) . "NTSTATUS ndr_pull_$e->{NAME}(struct ndr_pull *ndr, int ndr_flags, $args)";
+	fn_declare($e, "NTSTATUS ndr_pull_$e->{NAME}(struct ndr_pull *ndr, int ndr_flags, $args)");
 
 	pidl "{";
 	indent;
@@ -1836,6 +1868,7 @@ sub ParseTypedefPrint($)
 	my $args = $typefamily{$e->{DATA}->{TYPE}}->{DECL}->($e,"print");
 
 	pidl "void ndr_print_$e->{NAME}(struct ndr_print *ndr, const char *name, $args)";
+	pidl_hdr "void ndr_print_$e->{NAME}(struct ndr_print *ndr, const char *name, $args);";
 	pidl "{";
 	indent;
 	$typefamily{$e->{DATA}->{TYPE}}->{PRINT_FN_BODY}->($e->{DATA}, $e->{NAME});
@@ -1853,7 +1886,8 @@ sub ParseTypedefNdrSize($)
 	my $tf = $typefamily{$t->{DATA}->{TYPE}};
 	my $args = $tf->{SIZE_FN_ARGS}->($t);
 
-	pidl "size_t ndr_size_$t->{NAME}($args)";
+	fn_declare($t, "size_t ndr_size_$t->{NAME}($args)");
+
 	pidl "{";
 	indent;
 	$typefamily{$t->{DATA}->{TYPE}}->{SIZE_FN_BODY}->($t);
@@ -1871,6 +1905,7 @@ sub ParseFunctionPrint($)
 	return if has_property($fn, "noprint");
 
 	pidl "void ndr_print_$fn->{NAME}(struct ndr_print *ndr, const char *name, int flags, const struct $fn->{NAME} *r)";
+	pidl_hdr "void ndr_print_$fn->{NAME}(struct ndr_print *ndr, const char *name, int flags, const struct $fn->{NAME} *r);";
 	pidl "{";
 	indent;
 
@@ -1934,7 +1969,8 @@ sub ParseFunctionPush($)
 
 	return if has_property($fn, "nopush");
 
-	pidl fn_prefix($fn) . "NTSTATUS ndr_push_$fn->{NAME}(struct ndr_push *ndr, int flags, const struct $fn->{NAME} *r)";
+	fn_declare($fn, "NTSTATUS ndr_push_$fn->{NAME}(struct ndr_push *ndr, int flags, const struct $fn->{NAME} *r)");
+
 	pidl "{";
 	indent;
 
@@ -1995,15 +2031,14 @@ sub AllocateArrayLevel($$$$$)
 		pidl "if (ndr->flags & LIBNDR_FLAG_REF_ALLOC) {";
 		pidl "\tNDR_PULL_ALLOC_N($ndr, $var, $size);";
 		pidl "}";
-	} else {
-		pidl "NDR_PULL_ALLOC_N($ndr, $var, $size);";
+		if (grep(/in/,@{$e->{DIRECTION}}) and
+		    grep(/out/,@{$e->{DIRECTION}})) {
+			pidl "memcpy(r->out.$e->{NAME},r->in.$e->{NAME},$size * sizeof(*r->in.$e->{NAME}));";
+		}
+		return;
 	}
 
-	if (grep(/in/,@{$e->{DIRECTION}}) and
-	    grep(/out/,@{$e->{DIRECTION}}) and
-	    $pl->{POINTER_TYPE} eq "ref") {
-		pidl "memcpy(r->out.$e->{NAME},r->in.$e->{NAME},$size * sizeof(*r->in.$e->{NAME}));";
-	}
+	pidl "NDR_PULL_ALLOC_N($ndr, $var, $size);";
 }
 
 #####################################################################
@@ -2015,7 +2050,7 @@ sub ParseFunctionPull($)
 	return if has_property($fn, "nopull");
 
 	# pull function args
-	pidl fn_prefix($fn) . "NTSTATUS ndr_pull_$fn->{NAME}(struct ndr_pull *ndr, int flags, struct $fn->{NAME} *r)";
+	fn_declare($fn, "NTSTATUS ndr_pull_$fn->{NAME}(struct ndr_pull *ndr, int flags, struct $fn->{NAME} *r)");
 	pidl "{";
 	indent;
 
@@ -2123,12 +2158,10 @@ sub FunctionTable($)
 	my $count = 0;
 	my $uname = uc $interface->{NAME};
 
-	$count = $#{$interface->{FUNCTIONS}}+1;
-
-	return if ($count == 0);
+	return if ($#{$interface->{FUNCTIONS}}+1 == 0);
+	return unless defined ($interface->{PROPERTIES}->{uuid});
 
 	pidl "static const struct dcerpc_interface_call $interface->{NAME}\_calls[] = {";
-	$count = 0;
 	foreach my $d (@{$interface->{FUNCTIONS}}) {
 		next if not defined($d->{OPNUM});
 		pidl "\t{";
@@ -2136,11 +2169,12 @@ sub FunctionTable($)
 		pidl "\t\tsizeof(struct $d->{NAME}),";
 		pidl "\t\t(ndr_push_flags_fn_t) ndr_push_$d->{NAME},";
 		pidl "\t\t(ndr_pull_flags_fn_t) ndr_pull_$d->{NAME},";
-		pidl "\t\t(ndr_print_function_t) ndr_print_$d->{NAME}";
+		pidl "\t\t(ndr_print_function_t) ndr_print_$d->{NAME},";
+		pidl "\t\t".($d->{ASYNC}?"True":"False").",";
 		pidl "\t},";
 		$count++;
 	}
-	pidl "\t{ NULL, 0, NULL, NULL, NULL }";
+	pidl "\t{ NULL, 0, NULL, NULL, NULL, False }";
 	pidl "};";
 	pidl "";
 
@@ -2181,7 +2215,7 @@ sub FunctionTable($)
 
 	pidl "\nconst struct dcerpc_interface_table dcerpc_table_$interface->{NAME} = {";
 	pidl "\t.name\t\t= \"$interface->{NAME}\",";
-	pidl "\t.uuid\t\t= DCERPC_$uname\_UUID,";
+	pidl "\t.uuid\t\t= ". print_uuid($interface->{UUID}) .",";
 	pidl "\t.if_version\t= DCERPC_$uname\_VERSION,";
 	pidl "\t.helpstring\t= DCERPC_$uname\_HELPSTRING,";
 	pidl "\t.num_calls\t= $count,";
@@ -2191,11 +2225,75 @@ sub FunctionTable($)
 	pidl "};";
 	pidl "";
 
-	pidl "static NTSTATUS dcerpc_ndr_$interface->{NAME}_init(void)";
-	pidl "{";
-	pidl "\treturn librpc_register_interface(&dcerpc_table_$interface->{NAME});";
-	pidl "}";
-	pidl "";
+}
+
+#####################################################################
+# generate prototypes and defines for the interface definitions
+# FIXME: these prototypes are for the DCE/RPC client functions, not the 
+# NDR parser and so do not belong here, technically speaking
+sub HeaderInterface($)
+{
+	my($interface) = shift;
+
+	my $count = 0;
+
+	pidl_hdr "#ifndef _HEADER_RPC_$interface->{NAME}";
+	pidl_hdr "#define _HEADER_RPC_$interface->{NAME}";
+
+	pidl_hdr "";
+
+	if (defined $interface->{PROPERTIES}->{depends}) {
+		my @d = split / /, $interface->{PROPERTIES}->{depends};
+		foreach my $i (@d) {
+			pidl_hdr "#include \"librpc/gen_ndr/ndr_$i\.h\"";
+		}
+	}
+
+	if (defined $interface->{PROPERTIES}->{uuid}) {
+		my $name = uc $interface->{NAME};
+		pidl_hdr "#define DCERPC_$name\_UUID " . 
+		Parse::Pidl::Util::make_str(lc($interface->{PROPERTIES}->{uuid}));
+
+		if(!defined $interface->{PROPERTIES}->{version}) { $interface->{PROPERTIES}->{version} = "0.0"; }
+		pidl_hdr "#define DCERPC_$name\_VERSION $interface->{PROPERTIES}->{version}";
+
+		pidl_hdr "#define DCERPC_$name\_NAME \"$interface->{NAME}\"";
+
+		if(!defined $interface->{PROPERTIES}->{helpstring}) { $interface->{PROPERTIES}->{helpstring} = "NULL"; }
+		pidl_hdr "#define DCERPC_$name\_HELPSTRING $interface->{PROPERTIES}->{helpstring}";
+
+		pidl_hdr "extern const struct dcerpc_interface_table dcerpc_table_$interface->{NAME};";
+		pidl_hdr "NTSTATUS dcerpc_server_$interface->{NAME}_init(void);";
+	}
+
+	foreach (@{$interface->{FUNCTIONS}}) {
+		next if has_property($_, "noopnum");
+		next if grep(/$_->{NAME}/,@{$interface->{INHERITED_FUNCTIONS}});
+		my $u_name = uc $_->{NAME};
+	
+		my $val = sprintf("0x%02x", $count);
+		if (defined($interface->{BASE})) {
+			$val .= " + DCERPC_" . uc $interface->{BASE} . "_CALL_COUNT";
+		}
+		
+		pidl_hdr "#define DCERPC_$u_name ($val)";
+
+		pidl_hdr "NTSTATUS dcerpc_$_->{NAME}(struct dcerpc_pipe *p, TALLOC_CTX *mem_ctx, struct $_->{NAME} *r);";
+	   	pidl_hdr "struct rpc_request *dcerpc_$_->{NAME}\_send(struct dcerpc_pipe *p, TALLOC_CTX *mem_ctx, struct $_->{NAME} *r);";
+
+		pidl_hdr "";
+		$count++;
+	}
+
+	my $val = $count;
+
+	if (defined($interface->{BASE})) {
+		$val .= " + DCERPC_" . uc $interface->{BASE} . "_CALL_COUNT";
+	}
+
+	pidl_hdr "#define DCERPC_" . uc $interface->{NAME} . "_CALL_COUNT ($val)";
+
+	pidl_hdr "#endif /* _HEADER_RPC_$interface->{NAME} */";
 }
 
 #####################################################################
@@ -2204,8 +2302,10 @@ sub ParseInterface($$)
 {
 	my($interface,$needed) = @_;
 
+	HeaderInterface($interface);
+
 	# Typedefs
-	foreach my $d (@{$interface->{TYPEDEFS}}) {
+	foreach my $d (@{$interface->{TYPES}}) {
 		($needed->{"push_$d->{NAME}"}) && ParseTypedefPush($d);
 		($needed->{"pull_$d->{NAME}"}) && ParseTypedefPull($d);
 		($needed->{"print_$d->{NAME}"}) && ParseTypedefPrint($d);
@@ -2231,70 +2331,33 @@ sub ParseInterface($$)
 	FunctionTable($interface);
 }
 
-sub RegistrationFunction($$)
-{
-	my ($idl,$filename) = @_;
-
-	$filename =~ /.*\/ndr_(.*).c/;
-	my $basename = $1;
-	pidl "NTSTATUS dcerpc_$basename\_init(void)";
-	pidl "{";
-	indent;
-	pidl "NTSTATUS status = NT_STATUS_OK;";
-	foreach my $interface (@{$idl}) {
-		next if $interface->{TYPE} ne "INTERFACE";
-
-		my $count = ($#{$interface->{FUNCTIONS}}+1);
-
-		next if ($count == 0);
-
-		pidl "status = dcerpc_ndr_$interface->{NAME}_init();";
-		pidl "if (NT_STATUS_IS_ERR(status)) {";
-		pidl "\treturn status;";
-		pidl "}";
-		pidl "";
-	}
-	pidl "return status;";
-	deindent;
-	pidl "}";
-	pidl "";
-}
-
 #####################################################################
 # parse a parsed IDL structure back into an IDL file
 sub Parse($$)
 {
-	my($ndr,$filename) = @_;
+	my($ndr,$basename) = @_;
 
 	$tabs = "";
-	my $h_filename = $filename;
 	$res = "";
 
-	if ($h_filename =~ /(.*)\.c/) {
-		$h_filename = "$1.h";
-	}
+	$res_hdr = "";
+    pidl_hdr "/* header auto-generated by pidl */";
+	pidl_hdr "";
 
 	pidl "/* parser auto-generated by pidl */";
-	pidl "";
-	pidl "#include \"includes.h\"";
-	pidl "#include \"librpc/gen_ndr/ndr_misc.h\"";
-	pidl "#include \"librpc/gen_ndr/ndr_dcerpc.h\"";
-	pidl "#include \"$h_filename\"";
 	pidl "";
 
 	my %needed = ();
 
-	foreach my $x (@{$ndr}) {
-		($x->{TYPE} eq "INTERFACE") && NeededInterface($x, \%needed);
+	foreach (@{$ndr}) {
+		($_->{TYPE} eq "INTERFACE") && NeededInterface($_, \%needed);
 	}
 
-	foreach my $x (@{$ndr}) {
-		($x->{TYPE} eq "INTERFACE") && ParseInterface($x, \%needed);
+	foreach (@{$ndr}) {
+		($_->{TYPE} eq "INTERFACE") && ParseInterface($_, \%needed);
 	}
 
-	RegistrationFunction($ndr, $filename);
-
-	return $res;
+	return ($res_hdr, $res);
 }
 
 sub NeededFunction($$)
@@ -2354,12 +2417,9 @@ sub NeededTypedef($$)
 sub NeededInterface($$)
 {
 	my ($interface,$needed) = @_;
-	foreach my $d (@{$interface->{FUNCTIONS}}) {
-	    NeededFunction($d, $needed);
-	}
-	foreach my $d (reverse @{$interface->{TYPEDEFS}}) {
-	    NeededTypedef($d, $needed);
-	}
+	NeededFunction($_, $needed) foreach (@{$interface->{FUNCTIONS}});
+	NeededTypedef($_, $needed) foreach (reverse @{$interface->{TYPES}});
 }
 
 1;
+

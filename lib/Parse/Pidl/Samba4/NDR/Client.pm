@@ -3,7 +3,7 @@
 # Copyright tridge@samba.org 2003
 # released under the GNU GPL
 
-package Parse::Pidl::Samba::NDR::Client;
+package Parse::Pidl::Samba4::NDR::Client;
 
 use vars qw($VERSION);
 $VERSION = '0.01';
@@ -40,7 +40,7 @@ NTSTATUS dcerpc_$name(struct dcerpc_pipe *p, TALLOC_CTX *mem_ctx, struct $name *
 
 	status = dcerpc_ndr_request_recv(req);
 
-        if (NT_STATUS_IS_OK(status) && (p->conn->flags & DCERPC_DEBUG_PRINT_OUT)) {
+    if (NT_STATUS_IS_OK(status) && (p->conn->flags & DCERPC_DEBUG_PRINT_OUT)) {
 		NDR_PRINT_OUT_DEBUG($name, r);		
 	}
 ";

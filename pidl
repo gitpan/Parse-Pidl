@@ -8,19 +8,21 @@
 # released under the GNU GPL
 
 =pod
+
 =head1 NAME
 
-pidl - IDL Compiler written in Perl
+pidl - An IDL compiler written in Perl
 
 =head1 SYNOPSIS
 
 pidl --help
-pidl [--outputdir[=OUTNAME]] [--parse-idl-tree] [--dump-idl-tree] [--dump-ndr-tree] [--ndr-header[=OUTPUT]] [--header[=OUTPUT]] [--ejs[=OUTPUT]] [--swig[=OUTPUT]] [--uint-enums] [--ndr-parser[=OUTPUT]] [--client] [--server] [--dcom-proxy] [--com-header] [--warn-compat] [--quiet] [--verbose] [--template] [--eth-parser[=OUTPUT]] [--diff] [--dump-idl] [<idlfile>.idl]...
+
+pidl [--outputdir[=OUTNAME]] [--parse-idl-tree] [--dump-idl-tree] [--dump-ndr-tree] [--header[=OUTPUT]] [--ejs[=OUTPUT]] [--swig[=OUTPUT]] [--uint-enums] [--ndr-parser[=OUTPUT]] [--client] [--server] [--dcom-proxy] [--com-header] [--warn-compat] [--quiet] [--verbose] [--template] [--eth-parser[=OUTPUT]] [--diff] [--dump-idl] [--tdr-parser[=OUTPUT]] [--samba3-header[=OUTPUT]] [--samba3-parser=[OUTPUT]] [--samba3-server=[OUTPUT]] [--samba3-template[=OUTPUT]] [--samba3-client[=OUTPUT]] [<idlfile>.idl]...
 
 =head1 DESCRIPTION
 
 pidl is an IDL compiler written in Perl that aims to be somewhat 
-compatible with the midl compiler. IDL stands for 
+compatible with the midl compiler. IDL is short for 
 "Interface Definition Language".
 
 pidl can generate stubs for DCE/RPC server code, DCE/RPC 
@@ -69,13 +71,17 @@ Generate a new IDL file. File will be named OUTNAME.idl.
 
 Generate a C header file for the specified interface. Filename defaults to OUTNAME.h.
 
-=item I<--ndr-header>
-
-Generate a C header file with the prototypes for the NDR parsers. Filename defaults to ndr_OUTNAME.h.
-
 =item I<--ndr-parser>
 
-Generate a C file containing NDR parsers. Filename defaults to ndr_OUTNAME.c.
+Generate a C file and C header containing NDR parsers. The filename for 
+the parser defaults to ndr_OUTNAME.c. The header filename will be the 
+parser filename with the extension changed from .c to .h.
+
+=item I<--tdr-parser>
+
+Generate a C file and C header containing TDR parsers. The filename for 
+the parser defaults to tdr_OUTNAME.c. The header filename will be the 
+parser filename with the extension changed from .c to .h.
 
 =item I<--server>
 
@@ -89,13 +95,14 @@ be written to stdout.
 
 =item I<--eth-parser>
 
-Generate an Ethereal dissector (in C) for the interface. Filename
-defaults to packet-dcerpc-OUTNAME.c. 
+Generate an Ethereal dissector (in C) and header file. The dissector filename
+defaults to packet-dcerpc-OUTNAME.c while the header filename defaults to 
+packet-dcerpc-OUTNAME.h.
 	
 Pidl will read additional data from an ethereal conformance file if present. 
 Such a file should have the same location as the IDL file but with the 
-extension I<cnf> rather then I<idl>. See below for details on the format of 
-this file.
+extension I<cnf> rather then I<idl>. See L<Parse::Pidl::Ethereal::Conformance>
+for details on the format of this file.
 
 =item I<--diff>
 
@@ -112,6 +119,30 @@ file the to disk. Useful for debugging pidl.
 
 Tell pidl to dump the internal NDR information tree it generated 
 from the IDL file to disk.  Useful for debugging pidl.
+
+=item I<--samba3-header>
+
+Generate Samba3-style RPC header file. Filename defaults to rpc_BASENAME.h.
+
+=item I<--samba3-parser>
+
+Generate parser file for Samba3, to be placed in rpc_parse/. Filename defaults 
+to parse_BASENAME.c.
+
+=item I<--samba3-server>
+
+Generate server file for Samba3, to be placed in rpc_server/. Filename defaults 
+to srv_BASENAME.c.
+
+=item I<--samba3-template>
+
+Generate template for server-side implementation in Samba3, to be placed in 
+rpc_server/. Filename defaults to srv_BASENAME_nt.c
+
+=item I<--samba3-client>
+
+Generate client calls for Samba 3, to be placed in rpc_client/. Filename 
+defaults to cli_BASENAME.c.
 
 =back
 
@@ -248,7 +279,7 @@ Datagram support (ncadg_*)
 
 in, out, ref, length_is, switch_is, size_is, uuid, case, default, string, 
 unique, ptr, pointer_default, v1_enum, object, helpstring, range, local, 
-call_as, endpoint, switch_type, progid, coclass, iid_is.
+call_as, endpoint, switch_type, progid, coclass, iid_is, represent_as.
 
 =head2 PIDL Specific properties
 
@@ -329,87 +360,35 @@ oleautomation, optional, pragma, propget, propputref, propput, readonly,
 requestedit, restricted, retval, source, transmit_as, uidefault, 
 usesgetlasterror, vararg, vi_progid, wire_marshal. 
 
-=head1 ETHEREAL CONFORMANCE FILES
-
-Pidl needs additional data for ethereal output. This data is read from 
-so-called conformance files. This section describes the format of these 
-files.
-
-Conformance files are simple text files with a single command on each line.
-Empty lines and lines starting with a '#' character are ignored.
-Arguments to commands are seperated by spaces.
-
-The following commands are currently supported:
-
-=over 4
-
-=item TYPE name dissector ft_type base_type mask valsstring alignment
-
-Register new data type with specified name, what dissector function to call 
-and what properties to give header fields for elements of this type.
-
-=item NOEMIT type
-
-Suppress emitting a dissect_type function for the specified type
-
-=item PARAM_VALUE type param
-
-Set parameter to specify to dissector function for given type.
-
-=item HF_FIELD hf title filter ft_type base_type valsstring mask description
-
-Generate a custom header field with specified properties.
-
-=item HF_RENAME old_hf_name new_hf_name
-
-Force the use of new_hf_name when the parser generator was going to 
-use old_hf_name.
-
-This can be used in conjunction with HF_FIELD in order to make more then 
-one element use the same filter name.
-
-=item STRIP_PREFIX prefix
-
-Remove the specified prefix from all function names (if present).
-	
-=item PROTOCOL longname shortname filtername
-
-Change the short-, long- and filter-name for the current interface in
-Ethereal.
-
-=item FIELD_DESCRIPTION field desc
-
-Change description for the specified header field. `field' is the hf name of the field.
-
-=item IMPORT dissector code...
-
-Code to insert when generating the specified dissector. @HF@ and 
-@PARAM@ will be substituted.
-
-=back
-
 =head1 EXAMPLES
 
 	# Generating an ethereal parser
 	$ ./pidl --eth-parser -- atsvc.idl
 	
-	# Generating a TDR parser
-	$ ./pidl --tdr-parser --tdr-header --header -- regf.idl
+	# Generating a TDR parser and header
+	$ ./pidl --tdr-parser --header -- regf.idl
 
-=head1 VERSION
+	# Generating a Samba3 parser, client and server
+	$ ./pidl --samba3-parser --samba3-server --samba3-client -- dfs.idl
 
-This man page is correct for version 4.0 of the Samba suite. L<http://www.samba.org/>.
+	# Generating a Samba4 NDR parser, client and server
+	$ ./pidl --ndr-parser --ndr-client --ndr-server -- samr.idl
 
 =head1 SEE ALSO
 
-L<http://msdn.microsoft.com/library/en-us/rpc/rpc/field_attributes.asp>
-L<http://wiki.ethereal.com/DCE/RPC>
-yapp(1)
+L<http://msdn.microsoft.com/library/en-us/rpc/rpc/field_attributes.asp>,
+L<http://wiki.ethereal.com/DCE/RPC>, 
+L<http://www.samba.org/>,
+L<yapp(1)>
+
+=head1 LICENSE
+
+pidl is licensed under the GNU General Public License L<http://www.gnu.org/licenses/gpl.html>.
 
 =head1 AUTHOR
 
 pidl was written by Andrew Tridgell, Stefan Metzmacher, Tim Potter and Jelmer 
-Vernooij. 
+Vernooij. The current maintainer is Jelmer Vernooij.
 
 This manpage was written by Jelmer Vernooij, partially based on the original 
 pidl README by Andrew Tridgell. 
@@ -480,12 +459,15 @@ my($opt_dump_idl) = 0;
 my($opt_uint_enums) = 0;
 my($opt_diff) = 0;
 my($opt_header);
-my($opt_ndr_header);
+my($opt_samba3_header);
+my($opt_samba3_parser);
+my($opt_samba3_server);
+my($opt_samba3_template);
+my($opt_samba3_client);
 my($opt_template) = 0;
 my($opt_client);
 my($opt_server);
 my($opt_ndr_parser);
-my($opt_tdr_header);
 my($opt_tdr_parser);
 my($opt_eth_parser);
 my($opt_swig);
@@ -502,7 +484,8 @@ my($opt_warn_compat) = 0;
 sub ShowHelp()
 {
 print "perl IDL parser and code generator
-Copyright (C) tridge\@samba.org
+Copyright (C) Andrew Tridgell <tridge\@samba.org>
+Copyright (C) Jelmer Vernooij <jelmer\@samba.org>
 
 Usage: pidl [options] [--] <idlfile> [<idlfile>...]
 
@@ -523,10 +506,8 @@ Debugging:
 Samba 4 output:
  --header[=OUTFILE]      create generic header file [BASENAME.h]
  --uint-enums            don't use C enums, instead use uint* types
- --ndr-header[=OUTFILE]  create a C NDR-specific header file [ndr_BASENAME.h]
  --ndr-parser[=OUTFILE]  create a C NDR parser [ndr_BASENAME.c]
  --client[=OUTFILE]      create a C NDR client [ndr_BASENAME_c.c]
- --tdr-header[=OUTFILE]  create a C TDR header file [tdr_BASENAME.h]
  --tdr-parser[=OUTFILE]  create a C TDR parser [tdr_BASENAME.c]
  --ejs[=OUTFILE]         create ejs wrapper file [BASENAME_ejs.c]
  --swig[=OUTFILE]        create swig wrapper file [BASENAME.i]
@@ -535,6 +516,13 @@ Samba 4 output:
  --dcom-proxy[=OUTFILE]  create DCOM proxy [ndr_BASENAME_p.c]
  --com-header[=OUTFILE]  create header for COM [com_BASENAME.h]
 
+Samba 3 output:
+ --samba3-header[=OUTF]  create Samba3-style header [rpc_BASENAME.h]
+ --samba3-parser[=OUTF]  create parser for Samba3 [parse_BASENAME.c]
+ --samba3-template[=OUTF]create template implementation [srv_BASENAME_nt.c]
+ --samba3-server[=OUTF]  create server side wrappers for Samba3 [srv_BASENAME.c]
+ --samba3-client[=OUTF]  create client calls for Samba3 [cli_BASENAME.c]
+
 Ethereal parsers:
  --eth-parser[=OUTFILE]  create ethereal parser and header
 \n";
@@ -542,7 +530,7 @@ Ethereal parsers:
 }
 
 # main program
-GetOptions (
+my $result = GetOptions (
 	    'help|h|?' => \$opt_help, 
 	    'outputdir=s' => \$opt_outputdir,
 	    'dump-idl' => \$opt_dump_idl,
@@ -550,10 +538,13 @@ GetOptions (
 		'parse-idl-tree' => \$opt_parse_idl_tree,
 		'dump-ndr-tree:s' => \$opt_dump_ndr_tree,
 	    'uint-enums' => \$opt_uint_enums,
-	    'ndr-header:s' => \$opt_ndr_header,
+		'samba3-header:s' => \$opt_samba3_header,
+		'samba3-parser:s' => \$opt_samba3_parser,
+		'samba3-server:s' => \$opt_samba3_server,
+		'samba3-template:s' => \$opt_samba3_template,
+		'samba3-client:s' => \$opt_samba3_client,
 		'header:s' => \$opt_header,
 	    'server:s' => \$opt_server,
-	    'tdr-header:s' => \$opt_tdr_header,
 	    'tdr-parser:s' => \$opt_tdr_parser,
 	    'template' => \$opt_template,
 	    'ndr-parser:s' => \$opt_ndr_parser,
@@ -568,6 +559,10 @@ GetOptions (
 		'verbose' => \$opt_verbose,
 	    'warn-compat' => \$opt_warn_compat
 	    );
+
+if (not $result) {
+	exit(1);
+}
 
 if ($opt_help) {
     ShowHelp();
@@ -590,9 +585,8 @@ sub process_file($)
 		defined $pidl || die "Failed to load $idl_file";
 	} else {
 		require Parse::Pidl::IDL;
-		my $idl_parser = new Parse::Pidl::IDL;
 
-		$pidl = $idl_parser->parse_idl($idl_file);
+		$pidl = Parse::Pidl::IDL::parse_file($idl_file);
 		defined @$pidl || die "Failed to parse $idl_file";
 		require Parse::Pidl::Typelist;
 		Parse::Pidl::Typelist::LoadIdl($pidl);
@@ -620,8 +614,8 @@ sub process_file($)
 	}
 
 	if (defined($opt_com_header)) {
-		require Parse::Pidl::Samba::COM::Header;
-		my $res = Parse::Pidl::Samba::COM::Header::Parse($pidl);
+		require Parse::Pidl::Samba4::COM::Header;
+		my $res = Parse::Pidl::Samba4::COM::Header::Parse($pidl);
 		if ($res) {
 			my $comh_filename = ($opt_com_header or "$outputdir/com_$basename.h");
 			FileSave($comh_filename, 
@@ -632,8 +626,8 @@ sub process_file($)
 	}
 
 	if (defined($opt_dcom_proxy)) {
-		require Parse::Pidl::Samba::COM::Proxy;
-		my $res = Parse::Pidl::Samba::COM::Proxy::Parse($pidl);
+		require Parse::Pidl::Samba4::COM::Proxy;
+		my $res = Parse::Pidl::Samba4::COM::Proxy::Parse($pidl);
 		if ($res) {
 			my ($client) = ($opt_dcom_proxy or "$outputdir/$basename\_p.c");
 			FileSave($client, 
@@ -650,12 +644,13 @@ sub process_file($)
 
 	$pidl = Parse::Pidl::ODL::ODL2IDL($pidl);
 
-	if (defined($opt_ndr_header) or defined($opt_eth_parser) or 
+	if (defined($opt_eth_parser) or 
 	    defined($opt_client) or defined($opt_server) or 
 	    defined($opt_ndr_parser) or defined($opt_ejs) or 
-		defined($opt_dump_ndr_tree)) {
+		defined($opt_dump_ndr_tree) or defined($opt_samba3_header) or 
+	    defined($opt_samba3_header) or defined($opt_samba3_server) or 
+		defined($opt_samba3_template) or defined($opt_samba3_client)) {
 		require Parse::Pidl::NDR;
-		Parse::Pidl::NDR::Validate($pidl);
 		$ndr = Parse::Pidl::NDR::Parse($pidl);
 	}
 
@@ -664,53 +659,41 @@ sub process_file($)
 		SaveStructure($ndr_file, $ndr) or die "Failed to save $ndr_file\n";
 	}
 
+	my $gen_header = ($opt_header or "$outputdir/$basename.h");
 	if (defined($opt_header)) {
-		my $header = ($opt_header or "$outputdir/$basename.h");
-		require Parse::Pidl::Samba::Header;
-		FileSave($header, Parse::Pidl::Samba::Header::Parse($pidl));
-	}
-
-	if (defined($opt_ndr_header)) {
-		my $header = ($opt_ndr_header or "$outputdir/ndr_$basename.h");
-		require Parse::Pidl::Samba::NDR::Header;
-		FileSave($header, Parse::Pidl::Samba::NDR::Header::Parse($pidl, $basename));
-		if (defined($opt_swig)) {
-		  require Parse::Pidl::Samba::SWIG;
-		  my($filename) = ($opt_swig or "$outputdir/$basename.i");
-		  Parse::Pidl::Samba::SWIG::RewriteHeader($pidl, $header, $filename);
-		}
+		require Parse::Pidl::Samba4::Header;
+		FileSave($gen_header, Parse::Pidl::Samba4::Header::Parse($pidl));
 	}
 
 	my $h_filename = "$outputdir/ndr_$basename.h";
 	if (defined($opt_client)) {
-		require Parse::Pidl::Samba::NDR::Client;
+		require Parse::Pidl::Samba4::NDR::Client;
 		my ($client) = ($opt_client or "$outputdir/ndr_$basename\_c.c");
 
-		FileSave($client, Parse::Pidl::Samba::NDR::Client::Parse($ndr,$h_filename));
+		FileSave($client, Parse::Pidl::Samba4::NDR::Client::Parse($ndr,$h_filename));
 	}
 
 	if (defined($opt_ejs)) {
-		require Parse::Pidl::Samba::EJS;
-		require Parse::Pidl::Samba::EJSHeader;
-		FileSave("$outputdir/ndr_$basename\_ejs.c", Parse::Pidl::Samba::EJS::Parse($ndr, $h_filename));
-
-		FileSave("$outputdir/ndr_$basename\_ejs.h", Parse::Pidl::Samba::EJSHeader::Parse($ndr));
+		require Parse::Pidl::Samba4::EJS;
+		my ($hdr,$prsr) = Parse::Pidl::Samba4::EJS::Parse($ndr, $h_filename);
+		FileSave("$outputdir/ndr_$basename\_ejs.c", $prsr);
+		FileSave("$outputdir/ndr_$basename\_ejs.h", $hdr);
 	}
 
 	if (defined($opt_server)) {
-		require Parse::Pidl::Samba::NDR::Server;
+		require Parse::Pidl::Samba4::NDR::Server;
 		my $dcom = "";
 
 		foreach my $x (@{$pidl}) {
 			next if ($x->{TYPE} ne "INTERFACE");
 
 			if (Parse::Pidl::Util::has_property($x, "object")) {
-				require Parse::Pidl::Samba::COM::Stub;
-				$dcom .= Parse::Pidl::Samba::COM::Stub::ParseInterface($x);
+				require Parse::Pidl::Samba4::COM::Stub;
+				$dcom .= Parse::Pidl::Samba4::COM::Stub::ParseInterface($x);
 			}
 		}
 
-		FileSave(($opt_server or "$outputdir/ndr_$basename\_s.c"), Parse::Pidl::Samba::NDR::Server::Parse($ndr,$h_filename));
+		FileSave(($opt_server or "$outputdir/ndr_$basename\_s.c"), Parse::Pidl::Samba4::NDR::Server::Parse($ndr,$h_filename));
 
 		if ($dcom ne "") {
 			$dcom = "
@@ -726,9 +709,28 @@ $dcom
 	}
 
 	if (defined($opt_ndr_parser)) {
-		my $parser = ($opt_ndr_parser or "$outputdir/ndr_$basename.c");
-		require Parse::Pidl::Samba::NDR::Parser;
-		FileSave($parser, Parse::Pidl::Samba::NDR::Parser::Parse($ndr, $parser));
+		my $parser_fname = ($opt_ndr_parser or "$outputdir/ndr_$basename.c");
+		require Parse::Pidl::Samba4::NDR::Parser;
+		my $header_fname = $parser_fname; 
+		$header_fname =~ s/\.c$/\.h/;
+		my ($header,$parser) = Parse::Pidl::Samba4::NDR::Parser::Parse($ndr, $basename);
+
+		my $baseheader = $h_filename; $baseheader =~ s/\/ndr_/\//;
+		$header = "#include \"$baseheader\"\n$header";
+
+		$parser = "#include \"includes.h\"\n"
+		. "#include \"librpc/gen_ndr/ndr_misc.h\"\n"
+		. "#include \"librpc/gen_ndr/ndr_dcerpc.h\"\n"
+		. "#include \"$header_fname\"\n\n$parser";
+
+		FileSave($parser_fname, $parser);
+		FileSave($header_fname, $header);
+
+		if (defined($opt_swig)) {
+		  require Parse::Pidl::Samba4::SWIG;
+		  my($filename) = ($opt_swig or "$outputdir/$basename.i");
+		  Parse::Pidl::Samba4::SWIG::RewriteHeader($pidl, $header_fname, $filename);
+		}
 	}
 
 	if (defined($opt_eth_parser)) {
@@ -744,27 +746,63 @@ $dcom
 	  FileSave($eheader, $dh) if defined($dh);
 	}
 
-	my $tdr_parser = ($opt_tdr_parser or "$outputdir/tdr_$basename.c");
-	my $tdr_header = ($opt_tdr_header or "$outputdir/tdr_$basename.h");
 	if (defined($opt_tdr_parser)) {
-		require Parse::Pidl::Samba::TDR;
-		FileSave($tdr_parser, Parse::Pidl::Samba::TDR::Parser($pidl, $tdr_header));
-	}
-
-	if (defined($opt_tdr_header)) {
-		require Parse::Pidl::Samba::TDR;
-		FileSave($tdr_header, Parse::Pidl::Samba::TDR::Header($pidl, $outputdir,$basename));
+		my $tdr_parser = ($opt_tdr_parser or "$outputdir/tdr_$basename.c");
+		my $tdr_header = $tdr_parser;
+		$tdr_header =~ s/\.c$/\.h/;
+		require Parse::Pidl::Samba4::TDR;
+		my ($hdr,$prsr) = Parse::Pidl::Samba4::TDR::Parser($pidl, $tdr_header, $gen_header);
+		FileSave($tdr_parser, $prsr);
+		FileSave($tdr_header, $hdr);
 	}
 
 	if ($opt_template) {
-		require Parse::Pidl::Samba::Template;
-		print Parse::Pidl::Samba::Template::Parse($pidl);
+		require Parse::Pidl::Samba4::Template;
+		print Parse::Pidl::Samba4::Template::Parse($pidl);
 	}
+
+	if (defined($opt_samba3_header) or defined($opt_samba3_parser) or
+		defined($opt_samba3_server) or defined($opt_samba3_client) or
+		defined($opt_samba3_template)) {
+		require Parse::Pidl::Samba3::Types;
+		Parse::Pidl::Samba3::Types::LoadTypes($ndr);
+	}
+
+	if (defined($opt_samba3_header)) {
+		my $header = ($opt_samba3_header or "$outputdir/rpc_$basename.h");
+		require Parse::Pidl::Samba3::Header;
+		FileSave($header, Parse::Pidl::Samba3::Header::Parse($ndr, $basename));
+	}
+
+	if (defined($opt_samba3_parser)) {
+		my $header = ($opt_samba3_parser or "$outputdir/parse_$basename.c");
+		require Parse::Pidl::Samba3::Parser;
+		FileSave($header, Parse::Pidl::Samba3::Parser::Parse($ndr, $basename));
+	}
+
+	if (defined($opt_samba3_server)) {
+		my $header = ($opt_samba3_server or "$outputdir/srv_$basename.c");
+		require Parse::Pidl::Samba3::Server;
+		FileSave($header, Parse::Pidl::Samba3::Server::Parse($ndr, $basename));
+	}
+
+	if (defined($opt_samba3_template)) {
+		my $header = ($opt_samba3_template or "$outputdir/srv_$basename\_nt.c");
+		require Parse::Pidl::Samba3::Template;
+		FileSave($header, Parse::Pidl::Samba3::Template::Parse($ndr, $basename));
+	}
+
+	if (defined($opt_samba3_client)) {
+		my $header = ($opt_samba3_client or "$outputdir/cli_$basename.c");
+		require Parse::Pidl::Samba3::Client;
+		FileSave($header, Parse::Pidl::Samba3::Client::Parse($ndr, $basename));
+	}
+
 }
 
 if (scalar(@ARGV) == 0) {
 	print "pidl: no input files\n";
-	exit(0);
+	exit(1);
 }
 
 process_file($_) foreach (@ARGV);

@@ -4,9 +4,9 @@
 # Copyright jelmer@samba.org 2003-2005
 # released under the GNU GPL
 
-package Parse::Pidl::Samba::COM::Proxy;
+package Parse::Pidl::Samba4::COM::Proxy;
 
-use Parse::Pidl::Samba::COM::Header;
+use Parse::Pidl::Samba4::COM::Header;
 use Parse::Pidl::Util qw(has_property);
 
 use vars qw($VERSION);
@@ -54,7 +54,7 @@ sub ParseRegFunc($)
 		$res.= "
 	const void *base_vtable;
 
-	GUID_from_string(DCERPC_" . (uc $interface->{BASE}) . "_UUID, &base_iid);
+	base_iid = dcerpc_table_$interface->{BASE}.uuid;
 
 	base_vtable = dcom_proxy_vtable_by_iid(&base_iid);
 	if (base_vtable == NULL) {
@@ -73,7 +73,7 @@ sub ParseRegFunc($)
 	}
 
 	$res.= "
-	GUID_from_string(DCERPC_" . (uc $interface->{NAME}) . "_UUID, &proxy_vtable.iid);
+	proxy_vtable.iid = dcerpc_table_$interface->{NAME}.uuid;
 
 	return dcom_register_proxy(&proxy_vtable);
 }\n\n";
@@ -89,7 +89,7 @@ sub ParseFunction($$)
 	my $uname = uc $name;
 
 	$res.="
-static $fn->{RETURN_TYPE} dcom_proxy_$interface->{NAME}_$name(struct $interface->{NAME} *d, TALLOC_CTX *mem_ctx" . Parse::Pidl::Samba::COM::Header::GetArgumentProtoList($fn) . ")
+static $fn->{RETURN_TYPE} dcom_proxy_$interface->{NAME}_$name(struct $interface->{NAME} *d, TALLOC_CTX *mem_ctx" . Parse::Pidl::Samba4::COM::Header::GetArgumentProtoList($fn) . ")
 {
 	struct dcerpc_pipe *p;
 	NTSTATUS status = dcom_get_pipe(d, &p);
